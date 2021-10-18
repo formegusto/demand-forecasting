@@ -26,13 +26,30 @@ INVALID_COL_EXCEPTION = Exception("Only Required ["
                                   "'avg rhm'\n")
 ESSENTIAL_ENERGY_COL_EXCEPTION = Exception(
     "The \"energy (kw 15min)\" column must be included.")
+DUPLICATED_COLUMNS = Exception("Duplicate columns are not allowed.")
+SET_WINDOW_PLEASE = Exception("set_window func execute please.")
+SET_MODEL_PLEASE = Exception("set_model func execute please.")
+PREDICT_COLUMNS = ['energy (kw 15min)']
 
 
 def col_check(columns):
+    print("###### [Notice] columns validation start ###### \n")
+
+    if len(columns) == 0:
+        raise EMPTY_COL_EXCEPTION
+    if len(set(columns)) != len(columns):
+        raise DUPLICATED_COLUMNS
     for col in columns:
         if col not in DEFAULT_COLUMNS:
-            return False
-    return True
+            raise INVALID_COL_EXCEPTION
+
+    energy_col_idx = columns.index("energy (kw 15min)")
+    if energy_col_idx == -1:
+        raise ESSENTIAL_ENERGY_COL_EXCEPTION
+
+    print("###### [Notice] columns validation success ###### \n")
+
+    return energy_col_idx
 
 
 class TrainingModel:
@@ -42,6 +59,11 @@ class TrainingModel:
     _datas = None
     datas = None
     norm_datas = None
+    window = None
+    model = None
+
+    val_perfor = None
+    test_perfor = None
 
     def __repr__(self):
         IPython.display.clear_output()
@@ -58,21 +80,11 @@ class BasicModel(TrainingModel):
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
                  is_contain_cluster_label=False):
-        if len(columns) == 0:
-            raise EMPTY_COL_EXCEPTION
-        if col_check(columns) == False:
-            raise INVALID_COL_EXCEPTION
-
-        energy_col_idx = columns.index("energy (kw 15min)")
-        if energy_col_idx == -1:
-            raise ESSENTIAL_ENERGY_COL_EXCEPTION
-
-        print("energy_col_idx : {}".format(energy_col_idx))
-
+        IPython.display.clear_output()
+        self.energy_idx = col_check(columns)
         self.type = "Basic"
         self.name = name
         self.columns = columns
-        self.energy_idx = energy_col_idx
 
         # Data In
         db = KETI_DB()
@@ -109,7 +121,7 @@ class BasicModel(TrainingModel):
         norm_train_datas = (train_datas - mean) / std
         norm_val_datas = (val_datas - mean) / std
         norm_test_datas = (test_datas - mean) / std
-        print("###### [Notice] Normalization success ###### \n")
+        print("\n###### [Notice] Normalization success ###### \n")
 
         if is_contain_cluster_label == True:
             print("###### [Notice] cluster datas load start ###### \n")
@@ -128,8 +140,8 @@ class BasicModel(TrainingModel):
                     cluster_pattern_col.loc[_] = c_pattern[idx]
             print(cluster_pattern_col)
 
-            m = mean.values[energy_col_idx]
-            s = std.values[energy_col_idx]
+            m = mean.values[self.energy_idx]
+            s = std.values[self.energy_idx]
 
             norm_cluster_pattern_col = (cluster_pattern_col - m) / s
             norm_train_datas['cluster energy'] = norm_cluster_pattern_col['cluster energy']
@@ -138,6 +150,8 @@ class BasicModel(TrainingModel):
 
             print(
                 "\n###### [Notice] cluster pattern matching success ###### \n")
+
+            del cm
 
         self.datas = {
             "train": train_datas,
@@ -150,5 +164,73 @@ class BasicModel(TrainingModel):
             "test": norm_test_datas,
         }
 
-        del cm
         del db
+
+    def set_window(self, WINDOW_WIDTH=3):
+        # IPython.display.clear_output()
+        print("###### [Notice] generate window start ###### \n")
+        self.window = WindowGenerator(
+            input_width=WINDOW_WIDTH,
+            label_width=1,
+            shift=1,
+            label_columns=PREDICT_COLUMNS,
+            train_df=self.norm_datas['train'],
+            val_df=self.norm_datas['val'],
+            test_df=self.norm_datas['test']
+        )
+
+        print(self.window)
+
+        print("\n###### [Notice] generate window success ###### \n")
+
+    def set_model(self, layer=64):
+        # IPython.display.clear_output()
+        print("###### [Notice] set lstm model start ###### \n")
+
+        self.model = tf.keras.models.Sequential([
+            # Shape [batch, time, features] => [batch, time, lstm_units]
+            tf.keras.layers.LSTM(
+                layer, return_sequences=True, activation="tanh"),
+            # Shape => [batch, time, features]
+            tf.keras.layers.Dense(
+                units=1
+            )
+        ])
+        print(self.model)
+
+        print("\n###### [Notice] set lstm model success ###### \n")
+
+    def training(self, epochs=50):
+        if self.window == None:
+            raise SET_WINDOW_PLEASE
+        if self.model == None:
+            raise SET_MODEL_PLEASE
+        # IPython.display.clear_output()
+        compile_and_fit(self.model, self.window, EPOCHS=epochs)
+
+        self.val_perfor = self.model.evaluate(self.window.val)
+        self.test_perfor = self.model.evaluate(self.window.test)
+
+    def plot(self, max_subplots=3):
+        if self.window == None:
+            raise SET_WINDOW_PLEASE
+
+        self.window.plot(max_subplots=max_subplots)
+
+    def plot_performance(self):
+        IPython.display.clear_output()
+
+        x = np.arange(1)
+        width = 0.3
+
+        metric_name = 'mean_absolute_error'
+        metric_index = self.model.metrics_names.index(metric_name)
+        print(metric_index)
+        val_mae = self.val_perfor[metric_index]
+        test_mae = self.test_perfor[metric_index]
+
+        plt.bar(x - 0.17, val_mae, width, label='Validation')
+        plt.bar(x + 0.17, test_mae, width, label='Test')
+        plt.ylabel(f'MAE (average over all times and outputs)')
+        _ = plt.legend()
+        plt.show()
