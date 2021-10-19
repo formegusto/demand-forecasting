@@ -92,6 +92,7 @@ class BasicModel(TrainingModel):
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
                  is_contain_cluster_label=False):
+        print("###### [Notice] {} model Init Start ###### \n".format(name))
         IPython.display.clear_output()
         self.energy_idx = col_check(columns)
         self.type = "Basic"
@@ -101,6 +102,7 @@ class BasicModel(TrainingModel):
         # Data In
         db = KETI_DB()
 
+        print("###### [Notice] {} model Init Start ###### \n".format(name))
         print("###### [Notice] jg datas load start ###### \n")
         self._datas = db.get_jungang_table()[columns]
         print(self._datas)
