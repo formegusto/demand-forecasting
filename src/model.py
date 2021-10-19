@@ -1,7 +1,9 @@
 from src.util import *
+from src.data_process_supporter import *
 from functools import reduce
 import IPython
 import IPython.display
+import tensorflow as tf
 
 DEFAULT_COLUMNS = [
     'energy (kw 15min)',
@@ -12,6 +14,15 @@ DEFAULT_COLUMNS = [
     'season idx',
     'avg ta',
     'avg rhm'
+]
+STATISTIC_COLUMNS = [
+    'mean distance',
+    'mean sim',
+    'tss',
+    'wss',
+    'ecv',
+    'mse',
+    'mae',
 ]
 
 EMPTY_COL_EXCEPTION = Exception("Empty arrays are not allowed")
@@ -64,6 +75,7 @@ class TrainingModel:
 
     val_perfor = None
     test_perfor = None
+    predicts_list = None
 
     def __repr__(self):
         IPython.display.clear_output()
@@ -99,8 +111,6 @@ class BasicModel(TrainingModel):
         day_1_size = 24
         year_half_size = day_1_size * int(365 / 4)
         year_1_size = day_1_size * 365
-
-        is_switch = True
 
         train_datas = self._datas[:year_1_size]
         val_datas = self._datas[year_1_size:
@@ -217,6 +227,108 @@ class BasicModel(TrainingModel):
 
         self.window.plot(max_subplots=max_subplots)
 
+    def get_original_pattern(self, is_reshape=False):
+        og_pattern = self.norm_datas['test']['energy (kw 15min)'].values
+
+        if is_reshape == True:
+            return og_pattern.reshape(-1, 24)
+        return og_pattern
+
+    def statistic(self, predict_data_length=3):
+        statistic_datas = dict()
+
+        og_pattern = self.get_original_pattern(is_reshape=True)
+        mean_pattern = og_pattern.mean(axis=0)
+
+        # Clustering Data Operator
+        tss = 0
+        for og in og_pattern:
+            tss += euc_dis(
+                mean_pattern[predict_data_length:],
+                og[predict_data_length:]
+            ) ** 2
+        statistic_datas['tss'] = tss
+
+        wss = 0
+        distances = 0
+        similarities = 0
+        for idx, p_pattern in enumerate(self.predicts_list):
+            distance = euc_dis(
+                p_pattern,
+                og_pattern[idx][predict_data_length:]
+            )
+            similarity = cos_sim(
+                p_pattern,
+                og_pattern[idx][predict_data_length:]
+            )
+            wss += distance ** 2
+
+            distances = np.append(distances, [
+                distance
+            ])
+            similarities = np.append(similarities, [
+                similarity
+            ])
+
+        ecv = (1 - (wss / tss)) * 100
+        mean_dis = distances.mean()
+        mean_sim = similarities.mean()
+        statistic_datas['wss'] = wss
+        statistic_datas['ecv'] = ecv
+        statistic_datas['mean dis'] = mean_dis
+        statistic_datas['mean sim'] = mean_sim
+
+        org_y = og_pattern[:, 3:].copy().flatten()
+        pred_y = self.predicts_list.flatten()
+
+        # mse
+        mse = tf.keras.metrics.MeanSquaredError()
+        mse.update_state(org_y, pred_y)
+
+        # mae
+        mae = tf.keras.metrics.MeanAbsoluteError()
+        mae.update_state(org_y, pred_y)
+
+        statistic_datas['mse'] = mse.result().numpy()
+        statistic_datas['mae'] = mae.result().numpy()
+
+        return statistic_datas
+
+    def set_predict(self, is_reshape=False, predict_data_length=3):
+        if self.window == None:
+            raise SET_WINDOW_PLEASE
+        if self.model == None:
+            raise SET_MODEL_PLEASE
+
+        print("###### [Notice] set predict info start ###### \n")
+        self.predicts_list = np.array([])
+        test_df = self.norm_datas['test'].copy()
+        feature_length = len(test_df.columns)
+        cnt = 0
+        for split in range(0, round(len(test_df)), 24):
+            if cnt % 50 == 0:
+                print("{} / {}".format(cnt, round(len(test_df) / 24)))
+            predicts = []
+
+            for idx in range(0, (24 - predict_data_length)):
+                inputs = test_df[split:(
+                    split + 24)].values[idx: predict_data_length + idx].flatten()
+                inputs = inputs.reshape(-1,
+                                        predict_data_length, feature_length)
+                result = self.model(inputs).numpy().flatten()[2]
+
+                predicts.append(result)
+
+            self.predicts_list = np.append(self.predicts_list, [predicts])
+            cnt += 1
+        print("{} / {} complete.".format(cnt, round(len(test_df) / 24)))
+
+        if is_reshape == True:
+            self.predicts_list = self.predicts_list.reshape(
+                -1, 24 - predict_data_length)
+
+        print("\n###### [Notice] set predict info success ###### \n")
+
     def plot_performance(self):
         IPython.display.clear_output()
 
@@ -225,7 +337,6 @@ class BasicModel(TrainingModel):
 
         metric_name = 'mean_absolute_error'
         metric_index = self.model.metrics_names.index(metric_name)
-        print(metric_index)
         val_mae = self.val_perfor[metric_index]
         test_mae = self.test_perfor[metric_index]
 

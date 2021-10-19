@@ -1,4 +1,16 @@
 import numpy as np
+from numpy import dot
+from numpy.linalg import norm
+import numpy as np
+from scipy.spatial.distance import euclidean as euc
+
+
+def cos_sim(A, B):
+    return dot(A, B)/(norm(A)*norm(B))
+
+
+def euc_dis(A, B):
+    return euc(A, B)
 
 
 def calc_sin(ts, target_value):
