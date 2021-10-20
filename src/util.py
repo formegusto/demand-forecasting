@@ -1,9 +1,13 @@
 from pymongo import MongoClient as mc
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from tensorflow.keras import backend as K
+from tensorflow.keras.losses import mean_squared_error
 import pandas as pd
 import numpy as np
 from datetime import datetime as dt
+
+from tensorflow.python.ops.gen_math_ops import sqrt
 from src.data_process_supporter import *
 
 
@@ -156,17 +160,25 @@ WindowGenerator.example = example
 
 MAX_EPOCHS = 100
 
+# loss function
+# tf.keras.losses.MeanSquaredError()
+# tf.keras.losses.MeanAbsoluteError()
+# tf.keras.losses.Huber()
+
+
+def root_mean_squared_error(y_true, y_pred):
+    return K.sqrt(mean_squared_error(y_true, y_pred))
+
 
 def compile_and_fit(model, window, EPOCHS=20, patience=2):
     early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
                                                       patience=patience,
                                                       mode='min')
 
-    model.compile(loss=tf.losses.MeanSquaredError(),
+    model.compile(loss=tf.keras.losses.MeanSquaredError(),
                   optimizer=tf.optimizers.Adam(),
                   metrics=[
                       tf.metrics.MeanAbsoluteError(),
-
     ])
 
     history = model.fit(window.train, epochs=EPOCHS,
@@ -232,15 +244,48 @@ class KETI_DB:
 
         jg_datas = jg_datas[::4]
 
-        weather_df = pd.DataFrame(columns=['avg ta', 'avg rhm'])
+        weather_df = pd.DataFrame(columns=['weather', 'avg ta', 'avg rhm'])
         for weather in self.weather_col.find():
-            for _ in range(0, 24):
-                weather_df = weather_df.append({
-                    'avg ta': weather['avgTa'],
-                    'avg rhm': weather['avgRhm']
-                }, ignore_index=True)
+            try:
+                iscs = weather['weather']
+            except:
+                iscs = "특이사항없음"
+            if iscs != "특이사항없음":
+                iscs_idx = 0
+                for hours in range(0, 24):
+                    if (iscs[iscs_idx]['end time'] == ""):
+                        iscs[iscs_idx]['end time'] = weather['date'].replace(
+                            hour=23)
+                    if (hours >= iscs[iscs_idx]['start time'].hour) and \
+                            (hours <= iscs[iscs_idx]['end time'].hour):
+                        weather_df = weather_df.append({
+                            "weather": iscs[iscs_idx]['weather'],
+                            "avg ta": weather['avgTa'],
+                            "avg rhm": weather['avgRhm']
+                        }, ignore_index=True)
+                    else:
+                        weather_df = weather_df.append({
+                            "weather": "특이사항없음",
+                            "avg ta": weather['avgTa'],
+                            "avg rhm": weather['avgRhm']
+                        }, ignore_index=True)
+
+                    if ((iscs_idx + 1) < len(iscs)) and \
+                            (iscs[iscs_idx]['end time'].hour < (hours + 1)):
+                        iscs_idx += 1
+            else:
+                for hours in range(0, 24):
+                    weather_df = weather_df.append({
+                        "weather": "특이사항없음",
+                        "avg ta": weather['avgTa'],
+                        "avg rhm": weather['avgRhm']
+                    }, ignore_index=True)
 
         all_data_length = len(jg_datas)
+        jg_datas['weather'] = list(weather_df['weather'].values)[
+            :all_data_length]
+        jg_datas['weather idx'] = list(get_weather_to_idx(
+            _) for _ in weather_df['weather'].values)[:all_data_length]
         jg_datas['avg ta'] = list(map(float, weather_df['avg ta'].values))[
             :all_data_length]
         jg_datas['avg rhm'] = list(map(float, weather_df['avg rhm'].values))[

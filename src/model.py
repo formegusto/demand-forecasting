@@ -13,7 +13,8 @@ DEFAULT_COLUMNS = [
     'year cos',
     'season idx',
     'avg ta',
-    'avg rhm'
+    'avg rhm',
+    'weather idx'
 ]
 STATISTIC_COLUMNS = [
     'mean distance',
@@ -22,7 +23,7 @@ STATISTIC_COLUMNS = [
     'wss',
     'ecv',
     'mse',
-    'mae',
+    'mse',
 ]
 
 EMPTY_COL_EXCEPTION = Exception("Empty arrays are not allowed")
@@ -41,6 +42,7 @@ DUPLICATED_COLUMNS = Exception("Duplicate columns are not allowed.")
 SET_WINDOW_PLEASE = Exception("set_window func execute please.")
 SET_MODEL_PLEASE = Exception("set_model func execute please.")
 PREDICT_COLUMNS = ['energy (kw 15min)']
+SET_PREDICT_PLEASE = Exception("set predicts func execute please.")
 
 
 def col_check(columns):
@@ -76,6 +78,7 @@ class TrainingModel:
     val_perfor = None
     test_perfor = None
     predicts_list = None
+    val_predicts_list = None
 
     def __repr__(self):
         IPython.display.clear_output()
@@ -229,17 +232,30 @@ class BasicModel(TrainingModel):
 
         self.window.plot(max_subplots=max_subplots)
 
-    def get_original_pattern(self, is_reshape=False):
-        og_pattern = self.norm_datas['test']['energy (kw 15min)'].values
+    def get_original_pattern(self, is_reshape=False, is_val_datas=False):
+        if is_val_datas == True:
+            og_pattern = self.norm_datas['val']['energy (kw 15min)'].values
+        else:
+            og_pattern = self.norm_datas['test']['energy (kw 15min)'].values
 
         if is_reshape == True:
             return og_pattern.reshape(-1, 24)
         return og_pattern
 
-    def statistic(self, predict_data_length=3):
+    def statistic(self, predict_data_length=3, is_val_datas=False):
+        if is_val_datas == False and self.predicts_list is None:
+            raise SET_PREDICT_PLEASE
+        if is_val_datas == True and self.val_predicts_list is None:
+            raise SET_PREDICT_PLEASE
+
+        if is_val_datas == True:
+            predicts_list = self.val_predicts_list
+        else:
+            predicts_list = self.predicts_list
         statistic_datas = dict()
 
-        og_pattern = self.get_original_pattern(is_reshape=True)
+        og_pattern = self.get_original_pattern(
+            is_reshape=True, is_val_datas=is_val_datas)
         mean_pattern = og_pattern.mean(axis=0)
 
         # Clustering Data Operator
@@ -254,7 +270,7 @@ class BasicModel(TrainingModel):
         wss = 0
         distances = 0
         similarities = 0
-        for idx, p_pattern in enumerate(self.predicts_list):
+        for idx, p_pattern in enumerate(predicts_list):
             distance = euc_dis(
                 p_pattern,
                 og_pattern[idx][predict_data_length:]
@@ -281,7 +297,7 @@ class BasicModel(TrainingModel):
         statistic_datas['mean sim'] = mean_sim
 
         org_y = og_pattern[:, 3:].copy().flatten()
-        pred_y = self.predicts_list.flatten()
+        pred_y = predicts_list.flatten()
 
         # mse
         mse = tf.keras.metrics.MeanSquaredError()
@@ -296,17 +312,24 @@ class BasicModel(TrainingModel):
 
         return statistic_datas
 
-    def set_predict(self, is_reshape=False, predict_data_length=3):
+    def set_predict(self, is_reshape=False, predict_data_length=3, is_val_datas=False):
         if self.window == None:
             raise SET_WINDOW_PLEASE
         if self.model == None:
             raise SET_MODEL_PLEASE
+        IPython.display.clear_output()
+        print("###### [Notice] ({}) set predict ({}) info start ###### \n".
+              format(self.name, "validation" if is_val_datas == True else "test"))
 
-        print("###### [Notice] set predict info start ###### \n")
-        self.predicts_list = np.array([])
-        test_df = self.norm_datas['test'].copy()
+        predicts_list = np.array([])
+        if is_val_datas == True:
+            test_df = self.norm_datas['val'].copy()
+        else:
+            test_df = self.norm_datas['test'].copy()
+
         feature_length = len(test_df.columns)
         cnt = 0
+
         for split in range(0, round(len(test_df)), 24):
             if cnt % 50 == 0:
                 print("{} / {}".format(cnt, round(len(test_df) / 24)))
@@ -321,13 +344,18 @@ class BasicModel(TrainingModel):
 
                 predicts.append(result)
 
-            self.predicts_list = np.append(self.predicts_list, [predicts])
+            predicts_list = np.append(predicts_list, [predicts])
             cnt += 1
         print("{} / {} complete.".format(cnt, round(len(test_df) / 24)))
 
         if is_reshape == True:
-            self.predicts_list = self.predicts_list.reshape(
+            predicts_list = predicts_list.reshape(
                 -1, 24 - predict_data_length)
+
+        if is_val_datas == True:
+            self.val_predicts_list = predicts_list.copy()
+        else:
+            self.predicts_list = predicts_list.copy()
 
         print("\n###### [Notice] set predict info success ###### \n")
 

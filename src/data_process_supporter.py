@@ -44,3 +44,12 @@ def get_season_to_idx(season):
 
 
 SEASONS = ["봄", "여름", "가을", "겨울"]
+
+
+def get_weather_to_idx(weather):
+    if weather == "특이사항없음":
+        return 1
+    elif weather == "비":
+        return 2
+    elif weather == "눈":
+        return 3
