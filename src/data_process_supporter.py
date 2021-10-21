@@ -32,6 +32,17 @@ def get_season(month):
         return "겨울"
 
 
+def get_season_from_idx(idx):
+    if idx == 1:
+        return "봄"
+    elif idx == 2:
+        return "여름"
+    elif idx == 3:
+        return "가을"
+    elif idx == 4:
+        return "겨울"
+
+
 def get_season_to_idx(season):
     if season == "봄":
         return 1
