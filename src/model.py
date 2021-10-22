@@ -236,6 +236,20 @@ class BasicModel(TrainingModel):
 
         self.window.plot(max_subplots=max_subplots)
 
+    def visualization(self, is_val_datas=False):
+        if is_val_datas == False and self.predicts_list is None:
+            raise SET_PREDICT_PLEASE
+        if is_val_datas == True and self.val_predicts_list is None:
+            raise SET_PREDICT_PLEASE
+
+        if is_val_datas == True:
+            predicts_list = self.val_predicts_list
+        else:
+            predicts_list = self.predicts_list
+
+        og_pattern = self.get_original_pattern(
+            is_reshape=True, is_val_datas=is_val_datas)
+
     def get_original_pattern(self, is_reshape=False, is_val_datas=False):
         if is_val_datas == True:
             og_pattern = self.norm_datas['val']['energy (kw 15min)'].values
@@ -311,8 +325,13 @@ class BasicModel(TrainingModel):
         mae = tf.keras.metrics.MeanAbsoluteError()
         mae.update_state(org_y, pred_y)
 
+        # cos
+        cos = tf.keras.metrics.CosineSimilarity()
+        cos.update_state(org_y, pred_y)
+
         statistic_datas['mse'] = mse.result().numpy()
         statistic_datas['mae'] = mae.result().numpy()
+        statistic_datas['cos'] = cos.result().numpy()
 
         return statistic_datas
 
@@ -669,8 +688,13 @@ class SeasonModel(TrainingModel):
         mae = tf.keras.metrics.MeanAbsoluteError()
         mae.update_state(org_y, pred_y)
 
+        # cos
+        cos = tf.keras.metrics.CosineSimilarity()
+        cos.update_state(org_y, pred_y)
+
         statistic_datas['mse'] = mse.result().numpy()
         statistic_datas['mae'] = mae.result().numpy()
+        statistic_datas['cos'] = mae.result().numpy()
 
         return statistic_datas
 
