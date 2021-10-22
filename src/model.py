@@ -1,4 +1,5 @@
 from src.util import *
+from src.cluster_utils import WindowGenerator as CWindowGenerator
 from src.data_process_supporter import *
 from functools import reduce
 import IPython
@@ -740,3 +741,74 @@ class SeasonModel(TrainingModel):
         plt.ylabel(f'MAE (average over all times and outputs)')
         _ = plt.legend()
         plt.show()
+
+
+class ClusterModel(BasicModel):
+    def __init__(self, name="", columns=DEFAULT_COLUMNS.copy(), is_switch=False):
+        super().__init__(name=name, columns=columns,
+                         is_switch=is_switch, is_contain_cluster_label=True)
+
+    def set_window(self, WINDOW_WIDTH=3):
+        print("###### [Notice] generate cluster window start ###### \n")
+        self.window = CWindowGenerator(
+            input_width=WINDOW_WIDTH,
+            label_width=1,
+            shift=1,
+            label_columns=PREDICT_COLUMNS,
+            train_df=self.norm_datas['train'],
+            val_df=self.norm_datas['val'],
+            test_df=self.norm_datas['test']
+        )
+
+        print(self.window)
+
+        print("\n###### [Notice] generate cluster window success ###### \n")
+
+    def set_predict(self, is_reshape=False, predict_data_length=3, is_val_datas=False):
+        if self.window == None:
+            raise SET_WINDOW_PLEASE
+        if self.model == None:
+            raise SET_MODEL_PLEASE
+        IPython.display.clear_output()
+        print("###### [Notice] ({}) set predict ({}) info start ###### \n".
+              format(self.name, "validation" if is_val_datas == True else "test"))
+
+        predicts_list = np.array([])
+        if is_val_datas == True:
+            test_df = self.norm_datas['val'][self.norm_datas['val'].columns.difference(
+                ["cluster energy"])].copy()
+        else:
+            test_df = self.norm_datas['test'][self.norm_datas['test'].columns.difference([
+                                                                                         "cluster energy"])].copy()
+
+        feature_length = len(test_df.columns)
+        cnt = 0
+
+        for split in range(0, round(len(test_df)), 24):
+            if cnt % 50 == 0:
+                print("{} / {}".format(cnt, round(len(test_df) / 24)))
+            predicts = []
+
+            for idx in range(0, (24 - predict_data_length)):
+                inputs = test_df[split:(
+                    split + 24)].values[idx: predict_data_length + idx].flatten()
+                inputs = inputs.reshape(-1,
+                                        predict_data_length, feature_length)
+                result = self.model(inputs).numpy().flatten()[2]
+
+                predicts.append(result)
+
+            predicts_list = np.append(predicts_list, [predicts])
+            cnt += 1
+        print("{} / {} complete.".format(cnt, round(len(test_df) / 24)))
+
+        if is_reshape == True:
+            predicts_list = predicts_list.reshape(
+                -1, 24 - predict_data_length)
+
+        if is_val_datas == True:
+            self.val_predicts_list = predicts_list.copy()
+        else:
+            self.predicts_list = predicts_list.copy()
+
+        print("\n###### [Notice] set predict info success ###### \n")
