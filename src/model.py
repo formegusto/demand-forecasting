@@ -5,6 +5,7 @@ from functools import reduce
 import IPython
 import IPython.display
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 DEFAULT_COLUMNS = [
     'energy (kw 15min)',
@@ -46,6 +47,8 @@ PREDICT_COLUMNS = ['energy (kw 15min)']
 SET_PREDICT_PLEASE = Exception("set predicts func execute please.")
 SEASON_IDX_PLEASE = Exception(
     "\"Season Model\" must have \"season idx column\".")
+CLUSTER_MATCHING_TYPE_EXCEPTION = Exception(
+    "cluster matching system name is only \"general\", \"split\"")
 
 
 def col_check(columns):
@@ -98,7 +101,7 @@ class BasicModel(TrainingModel):
     def __init__(self, name="",
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
-                 is_contain_cluster_label=False):
+                 is_contain_cluster_label=False, matching_type="general", jump=3):
         print("###### [Notice] {} model Init Start ###### \n".format(name))
         IPython.display.clear_output()
         self.energy_idx = col_check(columns)
@@ -143,20 +146,37 @@ class BasicModel(TrainingModel):
         print("\n###### [Notice] Normalization success ###### \n")
 
         if is_contain_cluster_label == True:
+            if (matching_type != "general") and (matching_type != "split"):
+                raise CLUSTER_MATCHING_TYPE_EXCEPTION
             print("###### [Notice] cluster datas load start ###### \n")
-            cm = CLUSTER_MATCHING(self._datas)
-            print("###### [Notice] cluster datas load success ###### \n")
+            if matching_type == "general":
+                cm = CLUSTER_MATCHING(self._datas)
+                print("###### [Notice] cluster datas load success ###### \n")
 
-            print("###### [Notice] cluster pattern matching start ###### \n")
-            cluster_pattern_col = pd.DataFrame(columns=['cluster energy'])
-            for idx in range(0, len(self._datas), 24):
-                datas = self._datas[idx: idx + 24].copy()
-                date = datas.index[0]
+                print(
+                    "###### [Notice] cluster pattern matching start ###### \n")
+                cluster_pattern_col = pd.DataFrame(columns=['cluster energy'])
+                for idx in range(0, len(self._datas), 24):
+                    datas = self._datas[idx: idx + 24].copy()
+                    date = datas.index[0]
 
-                c_pattern = cm.matching(date)
+                    c_pattern = cm.matching(date)
 
-                for idx, _ in enumerate(datas.index):
-                    cluster_pattern_col.loc[_] = c_pattern[idx]
+                    for idx, _ in enumerate(datas.index):
+                        cluster_pattern_col.loc[_] = c_pattern[idx]
+            elif matching_type == "split":
+                cm = SPLIT_CLUSTER_MATCHING(self._datas)
+                print("###### [Notice] cluster datas load success ###### \n")
+
+                print(
+                    "###### [Notice] cluster pattern matching start ###### \n")
+                cluster_pattern_col = pd.DataFrame(columns=['cluster energy'])
+                for idx in range(0, len(self._datas), jump):
+                    datas = self._datas[idx: idx + jump].copy()
+                    c_pattern = cm.matching(datas)
+
+                    for idx, _ in enumerate(datas.index):
+                        cluster_pattern_col.loc[_] = c_pattern[idx]
             print(cluster_pattern_col)
 
             m = mean.values[self.energy_idx]
@@ -236,7 +256,7 @@ class BasicModel(TrainingModel):
 
         self.window.plot(max_subplots=max_subplots)
 
-    def visualization(self, is_val_datas=False):
+    def visualization(self, predict_data_length=3, is_val_datas=False):
         if is_val_datas == False and self.predicts_list is None:
             raise SET_PREDICT_PLEASE
         if is_val_datas == True and self.val_predicts_list is None:
@@ -246,6 +266,9 @@ class BasicModel(TrainingModel):
             predicts_list = self.val_predicts_list
         else:
             predicts_list = self.predicts_list
+
+        original_x_labels = [_ for _ in range(1, 25)]
+        predict_x_labels = [_ for _ in range(predict_data_length + 1, 24)]
 
         og_pattern = self.get_original_pattern(
             is_reshape=True, is_val_datas=is_val_datas)
@@ -768,9 +791,8 @@ class SeasonModel(TrainingModel):
 
 
 class ClusterModel(BasicModel):
-    def __init__(self, name="", columns=DEFAULT_COLUMNS.copy(), is_switch=False):
-        super().__init__(name=name, columns=columns,
-                         is_switch=is_switch, is_contain_cluster_label=True)
+    def __init__(self, name="", columns=DEFAULT_COLUMNS.copy(), is_switch=False, is_contain_cluster_label=False, matching_type="general", jump=3):
+        super().__init__(name=name, columns=columns, is_switch=is_switch, is_contain_cluster_label=is_contain_cluster_label, matching_type=matching_type, jump=jump)
 
     def set_window(self, WINDOW_WIDTH=3):
         print("###### [Notice] generate cluster window start ###### \n")

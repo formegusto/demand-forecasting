@@ -364,3 +364,102 @@ class CLUSTER_MATCHING:
         c_pattern = self.cluster_pattern_dict[season].loc[label].values[:length]
 
         return c_pattern
+
+
+class SPLIT_CLUSTER_MATCHING:
+    def __init__(self, datas):
+        db = KETI_DB()
+
+        # Clusterinbg 가져오기 작업
+        cur_cluster_result = db.cluster_col.find({
+            "uid": "jungang_pattern"
+        })
+        cluster_result = dict()
+
+        for data in cur_cluster_result:
+            in_dict = pd.DataFrame(columns=['Label', 'Weekday'])
+            in_dict.index.name = "Date Time"
+
+            season = data['season']
+            infos = data['info']
+
+            dtime = [dt.strptime(_['date'], "%Y-%m-%d") for _ in infos]
+            labels = [_['label'] for _ in infos]
+
+            for idx, _ in enumerate(dtime):
+                label = labels[idx]
+                in_dict.loc[_] = [label, _.weekday()]
+
+            cluster_result[season] = in_dict
+
+        self.cluster_pattern_dict = dict()
+
+        for season in SEASONS:
+            result = cluster_result[season]
+            in_dict = pd.DataFrame(columns=[_ for _ in range(0, 24)])
+            in_dict.index.name = "Label"
+
+            labels = list(set(result['Label']))
+            for label in labels:
+                cluster_pattern = np.array([])
+                date_in_labels = result[result['Label'] == label].index
+                for date in date_in_labels:
+                    idx = datas.index.get_loc(date)
+                    pattern = datas.iloc[idx: idx +
+                                         24]['energy (kw 15min)'].values
+                    cluster_pattern = np.append(cluster_pattern, pattern)
+                cluster_pattern = cluster_pattern.reshape(-1, 24).mean(axis=0)
+                in_dict.loc[label] = cluster_pattern
+
+            self.cluster_pattern_dict[season] = in_dict
+
+        # Clustering Matching System Config
+        self.cluster_dist_dict = dict()
+        for season in cluster_result.keys():
+            cluster_season_dict = dict()
+            week_list = set(cluster_result[season]['Weekday'])
+            for week in week_list:
+                week_dist = cluster_result[season][
+                    cluster_result[season]['Weekday'] == week
+                ]['Weekday'].groupby(cluster_result[season]['Label']).count().sort_values(ascending=False)
+                week_top_label = week_dist.index[0]
+
+                cluster_season_dict[week] = week_top_label
+            self.cluster_dist_dict[season] = cluster_season_dict
+
+        del db
+
+    def matching(self, datas):
+        #     print(datas)
+
+        date = datas.index[0]
+        season = get_season(date.month)
+        times = [_.hour for _ in datas.index]
+
+    #     print(date)
+    #     print(season)
+    #     print(times)
+
+        c_patterns = self.cluster_pattern_dict[season][times].copy().values
+    #     print("\n{}".format(c_patterns))
+
+        og_pattern = datas['energy (kw 15min)'].values
+    #     print("\n{}".format(og_pattern))
+
+        dis_info = pd.DataFrame(columns=["dis", "sim", "label"])
+        for idx, _ in enumerate(c_patterns):
+            dis = euc(_, og_pattern)
+            sim = 1 - cos_sim(_, og_pattern)
+
+            dis_info = dis_info.append({
+                "dis": dis,
+                "sim": sim,
+                "label": int(idx)
+            }, ignore_index=True)
+    #     print("\n{}\n".format(dis_info))
+
+        label = dis_info.sort_values(by=['dis', 'sim'])['label'].iloc[0]
+    #     print("{}\n".format(label))
+
+        # print("sel ==> {} \n".format(c_patterns[int(label)]))
+        return c_patterns[int(label)]
