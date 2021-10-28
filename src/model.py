@@ -86,6 +86,8 @@ class TrainingModel:
     predicts_list = None
     val_predicts_list = None
 
+    is_multi_step = False
+
 
 class BasicModel(TrainingModel):
     def __repr__(self):
@@ -101,7 +103,7 @@ class BasicModel(TrainingModel):
     def __init__(self, name="",
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
-                 is_contain_cluster_label=False, matching_type="general", jump=3):
+                 is_contain_cluster_label=False, matching_type="general", jump=3, is_multi_step=False):
         print("###### [Notice] {} model Init Start ###### \n".format(name))
         IPython.display.clear_output()
         self.energy_idx = col_check(columns)
@@ -203,21 +205,28 @@ class BasicModel(TrainingModel):
             "test": norm_test_datas,
         }
 
+        if is_multi_step == True:
+            self.is_multi_step = True
+            self.num_features = len(self.norm_datas['train'].columns)
+            print(
+                "\n###### [Notice] [features: {}] [energy idx: {}]\n set_model executing is multi_step model setting. ###### \n".format(self.num_features, self.energy_idx))
+
         del db
 
-    def set_window(self, WINDOW_WIDTH=3):
+    def set_window(self, WINDOW_WIDTH=3, OUT_STEPS=1):
         # IPython.display.clear_output()
         print("###### [Notice] generate window start ###### \n")
         self.window = WindowGenerator(
             input_width=WINDOW_WIDTH,
-            label_width=1,
-            shift=1,
+            label_width=OUT_STEPS,
+            shift=OUT_STEPS,
             label_columns=PREDICT_COLUMNS,
             train_df=self.norm_datas['train'],
             val_df=self.norm_datas['val'],
             test_df=self.norm_datas['test']
         )
 
+        self.OUT_STEPS = OUT_STEPS
         print(self.window)
 
         print("\n###### [Notice] generate window success ###### \n")
@@ -226,15 +235,28 @@ class BasicModel(TrainingModel):
         # IPython.display.clear_output()
         print("###### [Notice] set lstm model start ###### \n")
 
-        self.model = tf.keras.models.Sequential([
-            # Shape [batch, time, features] => [batch, time, lstm_units]
-            tf.keras.layers.LSTM(
-                layer, return_sequences=True, activation="tanh"),
-            # Shape => [batch, time, features]
-            tf.keras.layers.Dense(
-                units=1
-            )
-        ])
+        if self.is_multi_step == False:
+            self.model = tf.keras.models.Sequential([
+                # Shape [batch, time, features] => [batch, time, lstm_units]
+                tf.keras.layers.LSTM(
+                    layer, return_sequences=True, activation="tanh"),
+                # Shape => [batch, time, features]
+                tf.keras.layers.Dense(
+                    units=1
+                )
+            ])
+        elif self.is_multi_step == True:
+            self.model = tf.keras.models.Sequential([
+                # Shape [batch, time, features] => [batch, time, lstm_units]
+                tf.keras.layers.LSTM(
+                    layer, return_sequences=False, activation="tanh"),
+                # Shape => [batch, time, features]
+                tf.keras.layers.Dense(
+                    self.OUT_STEPS*self.num_features,
+                ),
+                # Shape => [batch, out_steps, features]
+                tf.keras.layers.Reshape([self.OUT_STEPS, self.num_features])
+            ])
         print(self.model)
 
         print("\n###### [Notice] set lstm model success ###### \n")
@@ -357,6 +379,55 @@ class BasicModel(TrainingModel):
         statistic_datas['cos'] = cos.result().numpy()
 
         return statistic_datas
+
+    def set_multi_predict(self, is_reshape=False, predict_data_length=3, is_val_datas=False):
+        if self.window == None:
+            raise SET_WINDOW_PLEASE
+        if self.model == None:
+            raise SET_MODEL_PLEASE
+        IPython.display.clear_output()
+        print("###### [Notice] ({}) set predict ({}) info start ###### \n".
+              format(self.name, "validation" if is_val_datas == True else "test"))
+
+        predicts_list = np.array([])
+        if is_val_datas == True:
+            test_df = self.norm_datas['val'].copy()
+        else:
+            test_df = self.norm_datas['test'].copy()
+
+        feature_length = len(test_df.columns)
+        cnt = 0
+
+        for split in range(0, round(len(test_df)), 24):
+            if cnt % 50 == 0:
+                print("{} / {}".format(cnt, round(len(test_df) / 24)))
+            predicts = []
+
+            for idx in range(0, (24 - predict_data_length), self.OUT_STEPS):
+                inputs = test_df[split:(
+                    split + 24)].values[idx: predict_data_length + idx].flatten()
+                inputs = inputs.reshape(-1,
+                                        predict_data_length, feature_length)
+                result = self.model(inputs).numpy()[
+                    :, :, self.energy_idx].flatten()
+
+                predicts.append(result)
+
+            predicts_list = np.append(predicts_list, [predicts])
+            cnt += 1
+
+        print("{} / {} complete.".format(cnt, round(len(test_df) / 24)))
+
+        if is_reshape == True:
+            predicts_list = predicts_list.reshape(
+                -1, 24 - predict_data_length)
+
+        if is_val_datas == True:
+            self.val_predicts_list = predicts_list.copy()
+        else:
+            self.predicts_list = predicts_list.copy()
+
+        print("\n###### [Notice] set predict info success ###### \n")
 
     def set_predict(self, is_reshape=False, predict_data_length=3, is_val_datas=False):
         if self.window == None:
@@ -792,7 +863,8 @@ class SeasonModel(TrainingModel):
 
 class ClusterModel(BasicModel):
     def __init__(self, name="", columns=DEFAULT_COLUMNS.copy(), is_switch=False, is_contain_cluster_label=False, matching_type="general", jump=3):
-        super().__init__(name=name, columns=columns, is_switch=is_switch, is_contain_cluster_label=is_contain_cluster_label, matching_type=matching_type, jump=jump)
+        super().__init__(name=name, columns=columns, is_switch=is_switch,
+                         is_contain_cluster_label=is_contain_cluster_label, matching_type=matching_type, jump=jump)
 
     def set_window(self, WINDOW_WIDTH=3):
         print("###### [Notice] generate cluster window start ###### \n")
