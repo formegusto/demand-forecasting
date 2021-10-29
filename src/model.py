@@ -88,6 +88,9 @@ class TrainingModel:
 
     is_multi_step = False
 
+    # Only Multi Step / Single Shot, Multi Step / Autoregressive
+    model_type = "Single Step"
+
 
 class BasicModel(TrainingModel):
     def __repr__(self):
@@ -96,6 +99,7 @@ class BasicModel(TrainingModel):
             " - name : {}\n".format(self.name) +\
             " - columns : {}\n".format(reduce(lambda acc,
                                               cur: acc + "," + cur, self.columns)) +\
+            " - model type : {}\n".format(self.model_type) +\
             " - datas : \n{}\n".format(self.datas['train'][:5]) +\
             " - norm_datas : \n{}\n".format(
                 self.norm_datas['train'][:5])
@@ -103,13 +107,14 @@ class BasicModel(TrainingModel):
     def __init__(self, name="",
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
-                 is_contain_cluster_label=False, matching_type="general", jump=3, is_multi_step=False):
+                 is_contain_cluster_label=False, matching_type="general", jump=3, is_multi_step=False, model_type="Single Step"):
         print("###### [Notice] {} model Init Start ###### \n".format(name))
         IPython.display.clear_output()
         self.energy_idx = col_check(columns)
         self.type = "Basic"
         self.name = name
         self.columns = columns
+        self.model_type = model_type
 
         # Data In
         db = KETI_DB()
@@ -205,7 +210,7 @@ class BasicModel(TrainingModel):
             "test": norm_test_datas,
         }
 
-        if is_multi_step == True:
+        if "Multi Step" in self.model_type:
             self.is_multi_step = True
             self.num_features = len(self.norm_datas['train'].columns)
             print(
@@ -235,17 +240,18 @@ class BasicModel(TrainingModel):
         # IPython.display.clear_output()
         print("###### [Notice] set lstm model start ###### \n")
 
-        if self.is_multi_step == False:
+        if self.model_type == "Single Step":
             self.model = tf.keras.models.Sequential([
                 # Shape [batch, time, features] => [batch, time, lstm_units]
                 tf.keras.layers.LSTM(
                     layer, return_sequences=True, activation="tanh"),
                 # Shape => [batch, time, features]
                 tf.keras.layers.Dense(
-                    units=1
+                    units=1,
+                    kernel_initializer=tf.initializers.he_normal(seed=None)
                 )
             ])
-        elif self.is_multi_step == True:
+        elif self.model_type == "Multi Step / SingleShot":
             self.model = tf.keras.models.Sequential([
                 # Shape [batch, time, features] => [batch, time, lstm_units]
                 tf.keras.layers.LSTM(
@@ -253,10 +259,14 @@ class BasicModel(TrainingModel):
                 # Shape => [batch, time, features]
                 tf.keras.layers.Dense(
                     self.OUT_STEPS*self.num_features,
+                    kernel_initializer=tf.initializers.he_normal(seed=None)
                 ),
                 # Shape => [batch, out_steps, features]
                 tf.keras.layers.Reshape([self.OUT_STEPS, self.num_features])
             ])
+        elif self.model_type == "Multi Step / Autoregressive":
+            self.model = FeedBack(
+                units=32, out_steps=self.OUT_STEPS, num_features=self.num_features)
         print(self.model)
 
         print("\n###### [Notice] set lstm model success ###### \n")
