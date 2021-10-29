@@ -6,6 +6,7 @@ import IPython
 import IPython.display
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 
 DEFAULT_COLUMNS = [
     'energy (kw 15min)',
@@ -127,9 +128,10 @@ class BasicModel(TrainingModel):
 
         print("###### [Notice] Train, Val, Test Datas Config ###### \n")
         # Normalization Start
+        training_days = 396
         day_1_size = 24
-        year_half_size = day_1_size * int(365 / 4)
-        year_1_size = day_1_size * 365
+        year_half_size = day_1_size * int(training_days / 4)
+        year_1_size = day_1_size * training_days
 
         train_datas = self._datas[:year_1_size]
         val_datas = self._datas[year_1_size:
@@ -315,6 +317,133 @@ class BasicModel(TrainingModel):
             return og_pattern.reshape(-1, 24)
         return og_pattern
 
+    def evaluate_map(self, predict_data_length=3, is_val_datas=False):
+        if is_val_datas == False and self.predicts_list is None:
+            raise SET_PREDICT_PLEASE
+        if is_val_datas == True and self.val_predicts_list is None:
+            raise SET_PREDICT_PLEASE
+
+        if is_val_datas == True:
+            predicts_list = self.val_predicts_list
+        else:
+            predicts_list = self.predicts_list
+
+        # list init
+        p_list = predicts_list.copy()
+        o_list = self.norm_datas['test']['energy (kw 15min)'].values.reshape(
+            -1, 24)[:, predict_data_length:].copy()
+
+        APs = np.array([])
+        # operate APs
+        for idx, test_o in enumerate(o_list):
+            test_p = p_list[0]
+            # print("검출되어야 할 개수 : {}\n".format(len(test_o)))
+            threshold = 10
+            conf_threshold = 5
+            detect_df = pd.DataFrame(columns=['time', 'Confidense', 'Result'])
+            for idx, o in enumerate(test_o):
+                p = test_p[idx]
+                th = abs(o) * threshold / 100
+                conf_th = abs(o) * conf_threshold / 100
+                err = abs(abs(o) - abs(p))
+
+                result = "TP" if err < conf_th else "FP" if err < th else "No"
+
+                detect_df = detect_df.append({
+                    "time": idx + 1,
+                    "Confidense": "{}%".format(
+                        round((abs(o) - err) / abs(o) * 100, 2)
+                    ),
+                    "Result": result
+                }, ignore_index=True)
+
+            # print(detect_df)
+
+            detect_size = len(detect_df)
+
+            # protect-recall curve init
+            pr_check_df = detect_df[(
+                detect_df['Result'] == "TP"
+            ) | (
+                detect_df['Result'] == "FP"
+            )]
+            pr_df = pd.DataFrame(columns=['Time', 'Confidense', 'TP or FP',
+                                          '누적 TP', '누적 FP', 'Precision', 'Recall',
+                                          "Precision Value", "Recall Value"])
+
+            detect = 0
+            tp_detect = 0
+            fp_detect = 0
+            for idx in pr_check_df.index:
+                is_tp = pr_check_df.loc[idx]['Result'] == "TP"
+                if is_tp:
+                    tp_detect += 1
+                else:
+                    fp_detect += 1
+                detect += 1
+
+                pr_df = pr_df.append({
+                    "Time": idx,
+                    "Confidense": pr_check_df.loc[idx]['Confidense'],
+                    "TP or FP": pr_check_df.loc[idx]['Result'],
+                    "누적 TP": tp_detect,
+                    "누적 FP": fp_detect,
+                    "Precision": "{}/{}={}".format(
+                        tp_detect,
+                        detect,
+                        round(tp_detect / detect, 2)
+                    ),
+                    "Recall": "{}/{}={}".format(
+                        tp_detect,
+                        detect_size,
+                        round(tp_detect / detect_size, 2)
+                    ),
+                    "Precision Value": round(tp_detect / detect, 2),
+                    "Recall Value": round(tp_detect / detect_size, 2)
+                }, ignore_index=True)
+
+            # print(pr_df)
+
+            # protect-recall curve visualization
+            x = pr_df['Recall Value'].values
+            y = pr_df['Precision Value'].values
+
+            if len(x) <= 2:
+                continue
+            fn = interp1d(x, y, kind='next')
+
+            xint = np.linspace(x.min(), x.max(), 1000)
+            yintn = fn(xint)
+
+            # xint, yintl
+            check_x = xint.copy()
+            check_y = yintn.copy()
+            ap = 0
+            x_point = check_x[0]
+            y_point = check_y[0]
+            for idx, _ in enumerate(check_y):
+                if y_point != _:
+                    area_x_start = x_point
+                    area_x_end = check_x[idx - 1]
+
+                    width = area_x_end - area_x_start  # width
+                    ap += (width * y_point)
+
+                    x_point = check_x[idx]
+                    y_point = _
+
+            # plt.plot(x, y, "b")
+            # plt.plot(xint, yintn, 'r')
+            # plt.xlabel("Recall")
+            # plt.ylabel("Precision")
+            # plt.title("PR Curve")
+            # plt.show()
+            APs = np.append(APs, [ap])
+
+        MAP = APs.mean()
+
+        return MAP
+
     def statistic(self, predict_data_length=3, is_val_datas=False):
         if is_val_datas == False and self.predicts_list is None:
             raise SET_PREDICT_PLEASE
@@ -387,6 +516,9 @@ class BasicModel(TrainingModel):
         statistic_datas['mse'] = mse.result().numpy()
         statistic_datas['mae'] = mae.result().numpy()
         statistic_datas['cos'] = cos.result().numpy()
+        statistic_datas['map'] = self.evaluate_map(predict_data_length=predict_data_length,
+                                                   is_val_datas=is_val_datas
+                                                   )
 
         return statistic_datas
 
