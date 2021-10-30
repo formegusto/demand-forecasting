@@ -302,10 +302,14 @@ class BasicModel(TrainingModel):
             predicts_list = self.predicts_list
 
         original_x_labels = [_ for _ in range(1, 25)]
-        predict_x_labels = [_ for _ in range(predict_data_length + 1, 24)]
+        predict_x_labels = [_ for _ in range(predict_data_length + 1, 25)]
 
-        og_pattern = self.get_original_pattern(
+        og_patterns = self.get_original_pattern(
             is_reshape=True, is_val_datas=is_val_datas)
+        p_patterns = predicts_list.reshape(-1, 24 - predict_data_length)
+
+        print(og_patterns)
+        print(len(p_patterns))
 
     def get_original_pattern(self, is_reshape=False, is_val_datas=False):
         if is_val_datas == True:
