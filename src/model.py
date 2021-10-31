@@ -128,7 +128,7 @@ class BasicModel(TrainingModel):
 
         print("###### [Notice] Train, Val, Test Datas Config ###### \n")
         # Normalization Start
-        training_days = 396
+        training_days = 365
         day_1_size = 24
         year_half_size = day_1_size * int(training_days / 4)
         year_1_size = day_1_size * training_days
