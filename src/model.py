@@ -6,7 +6,10 @@ import IPython
 import IPython.display
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy.interpolate import interp1d
+import math
+import warnings
 
 DEFAULT_COLUMNS = [
     'energy (kw 15min)',
@@ -296,6 +299,11 @@ class BasicModel(TrainingModel):
         if is_val_datas == True and self.val_predicts_list is None:
             raise SET_PREDICT_PLEASE
 
+        warnings.filterwarnings(action='ignore')
+        sns.set(rc={'figure.figsize': (15.7, 13.27)})
+        plt.rcParams['figure.figsize'] = 15.7, 13.27
+        plt.rcParams['font.family'] = 'AppleGothic'
+
         if is_val_datas == True:
             predicts_list = self.val_predicts_list
         else:
@@ -308,8 +316,35 @@ class BasicModel(TrainingModel):
             is_reshape=True, is_val_datas=is_val_datas)
         p_patterns = predicts_list.reshape(-1, 24 - predict_data_length)
 
-        print(og_patterns)
-        print(len(p_patterns))
+        print(len(og_patterns), og_patterns.shape)
+        print(len(p_patterns), p_patterns.shape)
+
+        for _ in range(0, len(og_patterns), 50):
+            now_og_patterns = og_patterns[_:_+50].copy()
+            now_p_patterns = p_patterns[_:_+50].copy()
+
+            fig, axes = plt.subplots(10, 5, figsize=(30, 30))
+            ax = plt.gca()
+            ax.axes.xaxis.set_visible(False)
+            ax.axes.yaxis.set_visible(False)
+
+            for idx, og_pattern in enumerate(now_og_patterns):
+                sns.lineplot(
+                    original_x_labels,
+                    og_pattern,
+                    lw=2,
+                    ax=axes[math.floor(idx/5)][math.floor(idx % 5)]
+                )
+                sns.lineplot(
+                    predict_x_labels,
+                    now_p_patterns[idx],
+                    lw=3,
+                    ax=axes[math.floor(idx/5)][math.floor(idx % 5)]
+                )
+
+            plt.show()
+
+        warnings.filterwarnings(action='default')
 
     def get_original_pattern(self, is_reshape=False, is_val_datas=False):
         if is_val_datas == True:
