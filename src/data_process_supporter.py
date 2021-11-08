@@ -22,9 +22,9 @@ def calc_cos(ts, target_value):
 
 
 def get_season(month):
-    if month in [3, 4, 5]:
+    if month in [3, 4, 5, 6]:
         return "봄"
-    elif month in [6, 7, 8]:
+    elif month in [6, 7]:
         return "여름"
     elif month in [9, 10, 11]:
         return "가을"

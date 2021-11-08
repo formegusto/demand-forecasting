@@ -188,7 +188,7 @@ def compile_and_fit(model, window, EPOCHS=20, patience=2):
 
 
 class KETI_DB:
-    def __init__(self):
+    def __init__(self, clustering_type="old"):
         self.mongo_uri = "mongodb://localhost:27017"
 
         print("connect KETIDB,,,")
@@ -197,7 +197,10 @@ class KETI_DB:
         self.keti_db = self.client.keti_pattern_recognition
 
         self.jungang_col = self.keti_db.jungang_pattern
-        self.cluster_col = self.keti_db.cluster_info
+        if clustering_type == "old":
+            self.cluster_col = self.keti_db.cluster_info
+        elif clustering_type == "new":
+            self.cluster_col = self.keti_db.cluster_info_change_season
         self.weather_col = self.keti_db.weather_info
 
         print("connect success")
@@ -295,8 +298,8 @@ class KETI_DB:
 
 
 class CLUSTER_MATCHING:
-    def __init__(self, datas):
-        db = KETI_DB()
+    def __init__(self, datas, clustering_type="old"):
+        db = KETI_DB(clustering_type=clustering_type)
 
         # Clusterinbg 가져오기 작업
         cur_cluster_result = db.cluster_col.find({

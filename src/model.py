@@ -111,7 +111,8 @@ class BasicModel(TrainingModel):
     def __init__(self, name="",
                  columns=DEFAULT_COLUMNS.copy(),
                  is_switch=False,
-                 is_contain_cluster_label=False, matching_type="general", jump=3, is_multi_step=False, model_type="Single Step"):
+                 is_contain_cluster_label=False, matching_type="general", jump=3, is_multi_step=False, model_type="Single Step",
+                 clustering_type="old"):
         print("###### [Notice] {} model Init Start ###### \n".format(name))
         IPython.display.clear_output()
         self.energy_idx = col_check(columns)
@@ -162,7 +163,8 @@ class BasicModel(TrainingModel):
                 raise CLUSTER_MATCHING_TYPE_EXCEPTION
             print("###### [Notice] cluster datas load start ###### \n")
             if matching_type == "general":
-                cm = CLUSTER_MATCHING(self._datas)
+                cm = CLUSTER_MATCHING(
+                    self._datas, clustering_type=clustering_type)
                 print("###### [Notice] cluster datas load success ###### \n")
 
                 print(
@@ -548,12 +550,17 @@ class BasicModel(TrainingModel):
         mae = tf.keras.metrics.MeanAbsoluteError()
         mae.update_state(org_y, pred_y)
 
+        # mape
+        mape = tf.keras.metrics.MeanAbsolutePercentageError()
+        mape.update_state(org_y, pred_y)
+
         # cos
         cos = tf.keras.metrics.CosineSimilarity()
         cos.update_state(org_y, pred_y)
 
         statistic_datas['mse'] = mse.result().numpy()
         statistic_datas['mae'] = mae.result().numpy()
+        statistic_datas['mape'] = mape.result().numpy()
         statistic_datas['cos'] = cos.result().numpy()
         statistic_datas['map'] = self.evaluate_map(predict_data_length=predict_data_length,
                                                    is_val_datas=is_val_datas
